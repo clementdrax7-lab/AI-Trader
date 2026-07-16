@@ -1,4 +1,14 @@
-import streamlit as st
+import sys
+import os 
+
+# --- PATH FINDER (GPS) ---
+# This tells the app: "look 2 levels up to find the main ai_trading_bot folder"
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(root_dir)
+
+import streamlit as st  
 import plotly.graph_objects as go
 import pandas as pd
 from datetime import datetime, timezone
