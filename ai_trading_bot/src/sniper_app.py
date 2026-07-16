@@ -1,12 +1,15 @@
 import sys
-import os 
+import os
+# --- SUPER GPS (finds the folder no matter where it is) ---
+current_path = os.path.abspath(__file__)
+src_dir = os.path.dirname(current_path)
+bot_dir = os.path.dirname(src_dir)
+repo_dir = os.path.dirname(bot_dir)
 
-# --- PATH FINDER (GPS) ---
-# This tells the app: "look 2 levels up to find the main ai_trading_bot folder"
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(os.path.dirname(current_dir))
-sys.path.append(root_dir)
+# Add all levels to the path to be safe
+sys.path.append(src_dir)
+sys.path.append(bot_dir)
+sys.path.append(repo_dir)
 
 import streamlit as st  
 import plotly.graph_objects as go
