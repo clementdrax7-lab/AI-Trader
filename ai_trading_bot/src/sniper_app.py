@@ -1,159 +1,142 @@
 import sys
 import os
-# --- SUPER GPS (finds the folder no matter where it is) ---
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+import numpy as np
+
+# --- 1. GPS LOCATOR ---
 current_path = os.path.abspath(__file__)
 src_dir = os.path.dirname(current_path)
 bot_dir = os.path.dirname(src_dir)
 repo_dir = os.path.dirname(bot_dir)
-
-# Add all levels to the path to be safe
 sys.path.append(src_dir)
 sys.path.append(bot_dir)
 sys.path.append(repo_dir)
 
-import streamlit as st  
-import plotly.graph_objects as go
-import pandas as pd
-from datetime import datetime, timezone
+# --- 2. CONFIGURATION ---
+st.set_page_config(page_title="Sniper Command Center", layout="wide", page_icon="⚔️")
 
-# Import your existing AI Brain components
-from ai_trading_bot.src.data_feeds.deriv_feed import DerivDataFeed
-from ai_trading_bot.src.analyzers.smart_money import ChartPrimeSMC
-from ai_trading_bot.src.analyzers.break_retest import BreakRetestAnalyzer
-from ai_trading_bot.src.analyzers.imbalance import FVGDetector
-from ai_trading_bot.src.risk.risk_manager import AdvancedRiskManager
-from ai_trading_bot.src.risk.deriv_execution import DerivExecutionEngine
+# --- 3. SIDEBAR CONTROLS ---
+st.sidebar.header("⚔️ Sniper Settings")
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="AI Sniper App", layout="wide", page_icon="🎯")
+# A. Asset Selector
+ASSETS = {
+    "Volatility 100 Index": "R_100",
+    "Volatility 75 Index": "R_75",
+    "Volatility 50 Index": "R_50",
+    "Volatility 10 Index": "R_10",
+    "Gold/USD": "XAUUSD"
+}
+selected_asset = st.sidebar.selectbox("🎯 Target Asset", list(ASSETS.keys()))
 
-# --- APP HEADER ---
-st.title("🎯 One-Click AI Sniper")
-st.markdown("Click the button below to scan the market, calculate the best entry, and visually project the Stop Loss/Take Profit zones.")
+# B. Timeframe Selector
+TIMEFRAMES = {
+    "1 Minute (Scalping)": "1m",
+    "5 Minutes (Day Trade)": "5m",
+    "15 Minutes (Swing)": "15m"
+}
+selected_tf = st.sidebar.selectbox("⏳ Timeframe", list(TIMEFRAMES.keys()))
 
-# --- SIDEBAR CONTROLS ---
-st.sidebar.header("🔫 Sniper Settings")
-symbol = st.sidebar.selectbox("Asset Class", ["R_100", "EURUSD", "BTCUSD"], index=0)
-auto_execute = st.sidebar.checkbox("🚀 Auto-Execute Trade?", value=False, help="If checked, the bot will instantly place the trade on Deriv when found.")
-
-# --- CHARTING FUNCTION (TRADINGVIEW STYLE) ---
-def plot_trade_setup(df, entry, sl, tp, direction):
-    """Draws a candlestick chart with Red/Green boxes for SL/TP."""
-    fig = go.Figure(data=[go.Candlestick(
-        x=df['time'],
-        open=df['open'], high=df['high'],
-        low=df['low'], close=df['close'],
-        name=symbol
-    )])
-
-    # Color Logic: Buy = Green TP / Red SL. Sell = Red TP / Green SL (Visual Logic)
-    # Standard TradingView Style: Risk (SL) is always Red/Pink, Reward (TP) is Green/Teal
+# --- 4. ENGINE (Simulation for UI Demo) ---
+# NOTE: This generates realistic pattern data to demonstrate the UI.
+# In Phase 4, we connect the live WebSocket here.
+def get_market_data(asset, tf):
+    # Adjust volatility based on asset
+    volatility = 2.0 if "100" in asset else 1.0
+    if "Gold" in asset: volatility = 0.5
     
-    # 1. STOP LOSS BOX (Risk Zone)
-    fig.add_shape(type="rect",
-        x0=df['time'].iloc[-10], x1=df['time'].iloc[-1], # Draw across last 10 candles
-        y0=entry, y1=sl,
-        fillcolor="rgba(255, 0, 0, 0.2)", # Transparent Red
-        line=dict(color="red", width=1),
-    )
-
-    # 2. TAKE PROFIT BOX (Reward Zone)
-    fig.add_shape(type="rect",
-        x0=df['time'].iloc[-10], x1=df['time'].iloc[-1],
-        y0=entry, y1=tp,
-        fillcolor="rgba(0, 255, 0, 0.2)", # Transparent Green
-        line=dict(color="green", width=1),
-    )
-
-    # 3. ENTRY LINE
-    fig.add_hline(y=entry, line_dash="dash", line_color="gray", annotation_text="ENTRY")
-    fig.add_hline(y=sl, line_color="red", annotation_text="STOP LOSS")
-    fig.add_hline(y=tp, line_color="green", annotation_text="TAKE PROFIT")
-
-    fig.update_layout(
-        template="plotly_dark",
-        height=600,
-        title=f"{direction} SETUP DETECTED",
-        xaxis_rangeslider_visible=False
-    )
-    return fig
-
-# --- MAIN LOGIC ---
-if st.button("🎯 SCAN FOR SETUP & CALCULATE", type="primary", use_container_width=True):
+    periods = 100
+    base_price = 1900 if "Gold" in asset else 2000
     
-    with st.spinner("Connecting to Deriv... Analyzing Structure..."):
-        # 1. INITIALIZE ENGINES
-        feed = DerivDataFeed(symbol=symbol)
-        smc = ChartPrimeSMC()
-        retest = BreakRetestAnalyzer()
-        fvg = FVGDetector()
-        risk = AdvancedRiskManager()
-        exec_engine = DerivExecutionEngine(symbol)
+    # Generate Candles
+    dates = pd.date_range(end=pd.Timestamp.now(), periods=periods, freq='1min')
+    prices = [base_price]
+    for _ in range(periods-1):
+        change = np.random.uniform(-volatility, volatility)
+        prices.append(prices[-1] + change)
+        
+    df = pd.DataFrame({'Close': prices}, index=dates)
+    df['Open'] = df['Close'].shift(1)
+    df['High'] = df[['Open', 'Close']].max(axis=1) + (volatility * 0.5)
+    df['Low'] = df[['Open', 'Close']].min(axis=1) - (volatility * 0.5)
+    df.iloc[0] = df.iloc[1] # Fix NaN
+    
+    # Calculate Indicators
+    # 1. RSI
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # 2. SMA (Simple Moving Average)
+    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    
+    return df
 
-        # 2. FETCH DATA
-        try:
-            df = feed.get_latest_candles(count=200) # Get more candles for better charts
-            
-            # 3. ANALYZE
-            smc_data = smc.analyze_structure(df)
-            bias = smc_data['Structure_Bias'].iloc[-1]
-            retest_res = retest.evaluate_retest(smc_data, bias)
-            fvg_res = fvg.scan_for_fvgs(smc_data)
+# Get Data
+df = get_market_data(selected_asset, selected_tf)
+current_price = df['Close'].iloc[-1]
+current_rsi = df['RSI'].iloc[-1]
 
-            # 4. DECISION LOGIC
-            setup_found = False
-            direction = None
-            entry_price = df['close'].iloc[-1]
-            
-            # Simple Logic: If Bias matches FVG or Retest (Aggressive Mode for Demo)
-            if bias == 1: # Bullish
-                direction = "BUY"
-                stop_loss = smc_data['Active_Low'].iloc[-1]
-                # If SL is too close, give it breathing room
-                if abs(entry_price - stop_loss) < 0.5: stop_loss = entry_price - 10.0
-                take_profit = entry_price + (abs(entry_price - stop_loss) * 2) # 1:2 RR
-                setup_found = True
-            
-            elif bias == -1: # Bearish
-                direction = "SELL"
-                stop_loss = smc_data['Active_High'].iloc[-1]
-                 # If SL is too close, give it breathing room
-                if abs(entry_price - stop_loss) < 0.5: stop_loss = entry_price + 10.0
-                take_profit = entry_price - (abs(entry_price - stop_loss) * 2) # 1:2 RR
-                setup_found = True
+# --- 5. SIGNAL LOGIC ---
+signal = "WAIT"
+color = "gray"
+direction = "neutral"
 
-            # 5. DISPLAY RESULTS
-            if setup_found:
-                st.success(f"✅ {direction} OPPORTUNITY IDENTIFIED")
-                
-                # Draw the TradingView Style Chart
-                fig = plot_trade_setup(df, entry_price, stop_loss, take_profit, direction)
-                st.plotly_chart(fig, use_container_width=True)
+if current_rsi < 30:
+    signal = "STRONG BUY"
+    color = "green"
+    direction = "up"
+elif current_rsi > 70:
+    signal = "STRONG SELL"
+    color = "red"
+    direction = "down"
 
-                # Show the Data
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("ENTRY", f"{entry_price:.2f}")
-                c2.metric("STOP LOSS", f"{stop_loss:.2f}", delta=f"-{(abs(entry_price-stop_loss)):.2f}")
-                c3.metric("TAKE PROFIT", f"{take_profit:.2f}", delta=f"+{(abs(entry_price-take_profit)):.2f}")
-                c4.metric("RISK:REWARD", "1:2")
+# --- 6. MAIN DASHBOARD ---
+st.title(f"{selected_asset} [{TIMEFRAMES[selected_tf]}]")
 
-                # 6. EXECUTE (If Auto is checked)
-                if auto_execute:
-                    st.toast("🚀 Transmitting Order to Deriv...")
-                    lots = risk.calculate_position_size(symbol, entry_price, stop_loss)
-                    result = exec_engine.execute_market_order(direction, lots, stop_loss, take_profit)
-                    if result:
-                        st.balloons()
-                        st.success("🏆 TRADE EXECUTED SUCCESSFULLY ON MARKET")
-                    else:
-                        st.error("❌ Execution Failed (Check Logs)")
-                else:
-                    st.info("ℹ️ Auto-Execute is OFF. Use the numbers above to place the trade manually.")
+# Top Metrics Row
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Price", f"${current_price:.2f}", delta=f"{df['Close'].diff().iloc[-1]:.2f}")
+m2.metric("RSI (Strength)", f"{current_rsi:.1f}", delta="Overbought" if current_rsi > 70 else "Oversold" if current_rsi < 30 else "Normal", delta_color="inverse")
+m3.metric("Trend", "Bullish 🐂" if current_price > df['SMA_50'].iloc[-1] else "Bearish 🐻")
+m4.markdown(f"### :{color}[{signal}]")
 
-            else:
-                st.warning("⚠️ No High-Probability Setup Found right now. Market is ranging.")
-                # Show chart anyway so user can see
-                st.line_chart(df['close'])
+# --- 7. THE PRO CHART ---
+fig = go.Figure()
 
-        except Exception as e:
-            st.error(f"Error scanning market: {e}")
+# A. Candlestick Layer
+fig.add_trace(go.Candlestick(x=df.index,
+                open=df['Open'], high=df['High'],
+                low=df['Low'], close=df['Close'],
+                name="Price"))
+
+# B. SMA Layer
+fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], 
+                        line=dict(color='orange', width=2), name="SMA 50"))
+
+# C. Buy/Sell Arrows
+if direction == "up":
+    fig.add_annotation(x=df.index[-1], y=df['Low'].iloc[-1], text="⬆️ BUY", showarrow=True, arrowhead=1)
+if direction == "down":
+    fig.add_annotation(x=df.index[-1], y=df['High'].iloc[-1], text="⬇️ SELL", showarrow=True, arrowhead=1)
+
+fig.update_layout(height=500, template="plotly_dark", title=f"Live Analysis: {selected_asset}", xaxis_rangeslider_visible=False)
+st.plotly_chart(fig, use_container_width=True)
+
+# --- 8. EXECUTION CENTER ---
+st.divider()
+st.subheader("🚀 Execution Panel")
+
+c1, c2 = st.columns([3, 1])
+
+with c1:
+    st.info("💡 **Strategy:** The AI identifies the trend. YOU pull the trigger in MT5.")
+
+with c2:
+    # THE DEEP LINK BUTTON
+    # This tries to open the MT5 App on your phone
+    st.link_button("🚀 OPEN MT5 APP", "metatrader5://")
+
