@@ -1,11 +1,9 @@
 streamlit
 pandas
-numpy
 plotly
-websockets
-scikit-learn
-pytz
+numpy
 yfinance
-python_deriv_api
+pytz
+python-deriv-api
 websockets
 pandas_ta
