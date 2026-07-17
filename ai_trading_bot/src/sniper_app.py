@@ -5,12 +5,12 @@ import asyncio
 import json
 import os
 from deriv_api import DerivAPI
-from datetime import datetime, timezone
+from datetime import datetime
 
-# --- 1. CONFIGURATION & APP-LIKE UI ---
+# --- 1. CONFIGURATION & UI ---
 st.set_page_config(page_title="Sniper Glass", layout="wide", page_icon="💎", initial_sidebar_state="collapsed")
 
-# --- CSS INJECTION ---
+# CSS STYLING
 st.markdown("""
     <style>
         .stApp { background-color: #000000; font-family: 'Helvetica Neue', sans-serif; }
@@ -21,29 +21,27 @@ st.markdown("""
             padding: 20px;
             margin-bottom: 20px;
             backdrop-filter: blur(10px);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
         .status-bar {
             display: flex; justify-content: space-between; align-items: center;
             padding: 10px 5px; border-bottom: 1px solid #333; margin-bottom: 20px;
         }
-        h1, h2, h3 { color: white !important; font-weight: 800 !important; letter-spacing: -0.5px; }
+        h1, h2, h3 { color: white !important; font-weight: 800 !important; }
         p { color: #888; font-size: 14px; }
         button[kind="primary"] {
             background: linear-gradient(135deg, #FF0000 0%, #CC0000 100%);
             color: white; border: none; border-radius: 30px; height: 60px; width: 100%;
-            font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
-            box-shadow: 0 5px 20px rgba(255, 0, 0, 0.3); transition: transform 0.2s;
+            font-size: 18px; font-weight: 700; text-transform: uppercase;
+            box-shadow: 0 5px 20px rgba(255, 0, 0, 0.3);
         }
-        button[kind="primary"]:hover { transform: scale(1.02); }
-        .pill { padding: 5px 12px; border-radius: 50px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+        .pill { padding: 5px 12px; border-radius: 50px; font-size: 11px; font-weight: 700; }
         .pill-green { background: #003300; color: #00FF00; border: 1px solid #00FF00; }
         .pill-red { background: #330000; color: #FF0000; border: 1px solid #FF0000; }
         #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. THE BRAIN ---
+# --- 2. BRAIN ENGINE ---
 BRAIN_FILE = "sniper_brain.json"
 
 def load_brain():
@@ -61,7 +59,7 @@ async def auto_learn_from_history(token):
     try:
         await api.authorize(token)
         history = await api.profit_table({"profit_table": 1, "description": 1, "limit": 20})
-        if history.get('error'): return None
+        if history.get('error'): return
         
         brain = load_brain()
         transactions = history['profit_table']['transactions']
@@ -101,7 +99,7 @@ def add_indicators(df):
     df['BB_LOWER'] = df['SMA_20'] - (df['STD_20'] * 2)
     return df
 
-# --- 4. DATA & EXECUTION (Pure Deriv) ---
+# --- 4. DATA FEED ---
 async def get_market_data(symbol_api):
     api = DerivAPI(app_id=1089)
     try:
@@ -117,6 +115,7 @@ async def get_market_data(symbol_api):
     except: return None
     finally: await api.disconnect()
 
+# --- 5. EXECUTION ---
 async def execute_tri_strike(token, symbol_api, direction, stake, count):
     api = DerivAPI(app_id=1089)
     results = []
@@ -124,12 +123,10 @@ async def execute_tri_strike(token, symbol_api, direction, stake, count):
         await api.authorize(token)
         contract_type = "CALL" if direction == "BUY" else "PUT"
         safe_count = int(count)
-        
         for i in range(safe_count):
             proposal = await api.proposal({
                 "proposal": 1, "amount": stake, "barrier": "+0.25" if direction == "BUY" else "-0.25",
-                "basis": "stake", "contract_type": contract_type, "currency": "USD",
-                "duration": 5, "duration_unit": "t", "symbol": symbol_api
+                "basis": "stake", "contract_type": contract_type, "currency": "USD", "duration": 5, "duration_unit": "t", "symbol": symbol_api
             })
             if proposal.get('error'): results.append("❌ Failed")
             else:
@@ -141,7 +138,7 @@ async def execute_tri_strike(token, symbol_api, direction, stake, count):
     except: return ["❌ System Error"]
     finally: await api.disconnect()
 
-# --- 5. LOGIC ENGINE (Pinbar) ---
+# --- 6. LOGIC ---
 def analyze_setup(df, asset_name, brain):
     if df is None or df.empty: return "WAIT", 0, "No Data"
     last = df.iloc[-1]
@@ -158,32 +155,29 @@ def analyze_setup(df, asset_name, brain):
     
     signal, score, reason = "WAIT", 50, "Scanning..."
     
-    # 1. PINBAR CALCULATION
     body_size = abs(close - open_p)
     if body_size == 0: body_size = 0.01
     lower_wick = min(close, open_p) - low
     upper_wick = high - max(close, open_p)
-    
     is_hammer = lower_wick > (body_size * 2)
     is_star = upper_wick > (body_size * 2)
 
-    # 2. LOGIC MATCH
     if "Boom" in asset_name:
         if rsi < 20: signal, score, reason = "BUY", 98, "Boom Spike Zone"
     elif "Crash" in asset_name:
         if rsi > 80: signal, score, reason = "SELL", 98, "Crash Spike Zone"
     else:
-        bb_touch_buy = low <= bb_lower
-        if rsi < brain['rsi_limit_low'] and close > ema and bb_touch_buy and is_hammer:
+        bb_buy = low <= bb_lower
+        if rsi < brain['rsi_limit_low'] and close > ema and bb_buy and is_hammer:
             signal, score, reason = "BUY", 99, "🔥 CLEAN PINBAR REJECTION"
         
-        bb_touch_sell = high >= bb_upper
-        if rsi > brain['rsi_limit_high'] and close < ema and bb_touch_sell and is_star:
+        bb_sell = high >= bb_upper
+        if rsi > brain['rsi_limit_high'] and close < ema and bb_sell and is_star:
             signal, score, reason = "SELL", 99, "🔥 CLEAN PINBAR REJECTION"
             
     return signal, score, reason
 
-# --- 6. UI CONSTRUCTION ---
+# --- 7. UI LAYOUT ---
 ASSETS = {
     "Gold / USD": {"api": "frxXAUUSD", "tv": "OANDA:XAUUSD"},
     "Volatility 100": {"api": "R_100", "tv": "DERIV:VOLATILITY_100_INDEX"},
@@ -204,7 +198,7 @@ st.markdown(f"""
 
 c1, c2, c3 = st.columns()
 selected_name = c1.selectbox("MARKET", list(ASSETS.keys()), label_visibility="collapsed")
-entry_count = c2.select_slider("STACK", options=[1,2,3], value=1, label_visibility="collapsed")
+entry_count = c2.select_slider("STACK", options=, value=1, label_visibility="collapsed")
 stake = c3.number_input("STAKE", value=10.0, label_visibility="collapsed")
 asset_data = ASSETS[selected_name]
 
@@ -224,7 +218,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
 c_stat, c_btn = st.columns()
-
 with c_stat:
     if token:
         df = asyncio.run(get_market_data(asset_data['api']))
@@ -240,7 +233,6 @@ with c_stat:
         else:
             st.markdown("<h2 style='color: #888;'>CONNECTING...</h2>", unsafe_allow_html=True)
             st.session_state['last_signal'] = "WAIT"
-
 with c_btn:
     st.write("") 
     if st.button("ACTIVATE SNIPER", type="primary"):
