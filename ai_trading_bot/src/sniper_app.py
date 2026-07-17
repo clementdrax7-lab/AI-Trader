@@ -1,142 +1,139 @@
-import sys
-import os
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
-import plotly.graph_objects as go
-import numpy as np
+from datetime import datetime
+import pytz
 
-# --- 1. GPS LOCATOR ---
-current_path = os.path.abspath(__file__)
-src_dir = os.path.dirname(current_path)
-bot_dir = os.path.dirname(src_dir)
-repo_dir = os.path.dirname(bot_dir)
-sys.path.append(src_dir)
-sys.path.append(bot_dir)
-sys.path.append(repo_dir)
+# --- 1. CONFIGURATION ---
+st.set_page_config(page_title="Sniper Institutional", layout="wide", page_icon="🏦")
 
-# --- 2. CONFIGURATION ---
-st.set_page_config(page_title="Sniper Command Center", layout="wide", page_icon="⚔️")
-
-# --- 3. SIDEBAR CONTROLS ---
-st.sidebar.header("⚔️ Sniper Settings")
-
-# A. Asset Selector
-ASSETS = {
-    "Volatility 100 Index": "R_100",
-    "Volatility 75 Index": "R_75",
-    "Volatility 50 Index": "R_50",
-    "Volatility 10 Index": "R_10",
-    "Gold/USD": "XAUUSD"
-}
-selected_asset = st.sidebar.selectbox("🎯 Target Asset", list(ASSETS.keys()))
-
-# B. Timeframe Selector
-TIMEFRAMES = {
-    "1 Minute (Scalping)": "1m",
-    "5 Minutes (Day Trade)": "5m",
-    "15 Minutes (Swing)": "15m"
-}
-selected_tf = st.sidebar.selectbox("⏳ Timeframe", list(TIMEFRAMES.keys()))
-
-# --- 4. ENGINE (Simulation for UI Demo) ---
-# NOTE: This generates realistic pattern data to demonstrate the UI.
-# In Phase 4, we connect the live WebSocket here.
-def get_market_data(asset, tf):
-    # Adjust volatility based on asset
-    volatility = 2.0 if "100" in asset else 1.0
-    if "Gold" in asset: volatility = 0.5
+# --- 2. KILLZONE LOGIC ENGINE (The "ICT Clock") ---
+def get_ict_status():
+    # Convert current time to New York Time (EST)
+    tz_ny = pytz.timezone('US/Eastern')
+    now_ny = datetime.now(tz_ny)
+    current_hour = now_ny.hour
     
-    periods = 100
-    base_price = 1900 if "Gold" in asset else 2000
+    # Define Killzones (24h format)
+    status = "NO TRADE ZONE 💤"
+    color = "off"
     
-    # Generate Candles
-    dates = pd.date_range(end=pd.Timestamp.now(), periods=periods, freq='1min')
-    prices = [base_price]
-    for _ in range(periods-1):
-        change = np.random.uniform(-volatility, volatility)
-        prices.append(prices[-1] + change)
+    # Asian Range (20:00 - 00:00)
+    if 20 <= current_hour <= 23:
+        status = "ASIAN RANGE (Accumulation) 🟡"
+        color = "normal"
+    # London Open (02:00 - 05:00)
+    elif 2 <= current_hour < 5:
+        status = "LONDON KILLZONE (Manipulation) 🔴"
+        color = "off" # Streamlit metric color style
+    # NY Open (07:00 - 10:00)
+    elif 7 <= current_hour < 10:
+        status = "NY KILLZONE (Distribution) 🟢"
+        color = "normal"
+    # London Close (10:00 - 12:00)
+    elif 10 <= current_hour < 12:
+        status = "LONDON CLOSE (Reversal Risk) 🟠"
+        color = "off"
         
-    df = pd.DataFrame({'Close': prices}, index=dates)
-    df['Open'] = df['Close'].shift(1)
-    df['High'] = df[['Open', 'Close']].max(axis=1) + (volatility * 0.5)
-    df['Low'] = df[['Open', 'Close']].min(axis=1) - (volatility * 0.5)
-    df.iloc[0] = df.iloc[1] # Fix NaN
-    
-    # Calculate Indicators
-    # 1. RSI
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    
-    # 2. SMA (Simple Moving Average)
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
-    
-    return df
+    return status, now_ny.strftime("%H:%M EST")
 
-# Get Data
-df = get_market_data(selected_asset, selected_tf)
-current_price = df['Close'].iloc[-1]
-current_rsi = df['RSI'].iloc[-1]
+# --- 3. SIDEBAR SETTINGS ---
+st.sidebar.header("🏦 Institutional Settings")
 
-# --- 5. SIGNAL LOGIC ---
-signal = "WAIT"
-color = "gray"
-direction = "neutral"
+# Asset Mapping
+ASSET_MAP = {
+    "Volatility 75 Index": "DERIV:VOLATILITY_75_INDEX",
+    "Volatility 100 Index": "DERIV:VOLATILITY_100_INDEX",
+    "Gold / USD": "OANDA:XAUUSD",
+    "EUR / USD": "FX:EURUSD",
+    "GBP / USD": "FX:GBPUSD",
+    "US 30 (Dow)": "TVC:DJI",
+    "Boom 1000": "DERIV:BOOM_1000_INDEX",
+    "Crash 1000": "DERIV:CRASH_1000_INDEX"
+}
 
-if current_rsi < 30:
-    signal = "STRONG BUY"
-    color = "green"
-    direction = "up"
-elif current_rsi > 70:
-    signal = "STRONG SELL"
-    color = "red"
-    direction = "down"
+selected_name = st.sidebar.selectbox("🎯 Target Asset", list(ASSET_MAP.keys()))
+tv_symbol = ASSET_MAP[selected_name]
+timeframe = st.sidebar.select_slider("⏳ Timeframe", options=["1", "5", "15", "60", "240", "D"], value="15")
 
-# --- 6. MAIN DASHBOARD ---
-st.title(f"{selected_asset} [{TIMEFRAMES[selected_tf]}]")
+# --- 4. THE DASHBOARD ---
+st.title(f"🏦 Smart Money Terminal: {selected_name}")
 
-# Top Metrics Row
+# A. The Killzone Monitor (Live Data)
+ict_status, ny_time = get_ict_status()
+
+# Metrics Row
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("Price", f"${current_price:.2f}", delta=f"{df['Close'].diff().iloc[-1]:.2f}")
-m2.metric("RSI (Strength)", f"{current_rsi:.1f}", delta="Overbought" if current_rsi > 70 else "Oversold" if current_rsi < 30 else "Normal", delta_color="inverse")
-m3.metric("Trend", "Bullish 🐂" if current_price > df['SMA_50'].iloc[-1] else "Bearish 🐻")
-m4.markdown(f"### :{color}[{signal}]")
+m1.metric("NY Time (EST)", ny_time)
+m2.metric("Current Session", ict_status)
+m3.metric("Bias", "Check Structure 🔭")
+m4.metric("Volume", "Analyzing... 📊")
 
-# --- 7. THE PRO CHART ---
-fig = go.Figure()
+# --- 5. THE CHART (With Volume Pre-Loaded) ---
+# We enable 'hide_side_toolbar': false so you can draw your OWN boxes.
+tv_chart_code = f"""
+<div class="tradingview-widget-container" style="height: 650px; width: 100%">
+  <div id="tradingview_chart" style="height: calc(100% - 32px); width: 100%"></div>
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+  <script type="text/javascript">
+  new TradingView.widget(
+  {{
+    "autosize": true,
+    "symbol": "{tv_symbol}",
+    "interval": "{timeframe}",
+    "timezone": "America/New_York",
+    "theme": "dark",
+    "style": "1",
+    "locale": "en",
+    "toolbar_bg": "#f1f3f6",
+    "enable_publishing": false,
+    "allow_symbol_change": true,
+    "hide_side_toolbar": false,
+    "container_id": "tradingview_chart",
+    "studies": [
+      "Volume@tv-basicstudies", 
+      "RSI@tv-basicstudies",
+      "MASimple@tv-basicstudies"
+    ]
+  }}
+  );
+  </script>
+</div>
+"""
+components.html(tv_chart_code, height=700)
 
-# A. Candlestick Layer
-fig.add_trace(go.Candlestick(x=df.index,
-                open=df['Open'], high=df['High'],
-                low=df['Low'], close=df['Close'],
-                name="Price"))
-
-# B. SMA Layer
-fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], 
-                        line=dict(color='orange', width=2), name="SMA 50"))
-
-# C. Buy/Sell Arrows
-if direction == "up":
-    fig.add_annotation(x=df.index[-1], y=df['Low'].iloc[-1], text="⬆️ BUY", showarrow=True, arrowhead=1)
-if direction == "down":
-    fig.add_annotation(x=df.index[-1], y=df['High'].iloc[-1], text="⬇️ SELL", showarrow=True, arrowhead=1)
-
-fig.update_layout(height=500, template="plotly_dark", title=f"Live Analysis: {selected_asset}", xaxis_rangeslider_visible=False)
-st.plotly_chart(fig, use_container_width=True)
-
-# --- 8. EXECUTION CENTER ---
+# --- 6. ICT CONFLUENCE CHECKLIST ---
 st.divider()
-st.subheader("🚀 Execution Panel")
-
-c1, c2 = st.columns([3, 1])
+c1, c2 = st.columns([1, 2])
 
 with c1:
-    st.info("💡 **Strategy:** The AI identifies the trend. YOU pull the trigger in MT5.")
+    st.subheader("📝 Entry Checklist")
+    st.write("Confirm these before execution:")
+    st.checkbox("1. Liquidity Sweep (Turtle Soup)")
+    st.checkbox("2. Market Structure Shift (MSS)")
+    st.checkbox("3. Return to Order Block (OB)")
+    st.checkbox("4. Fair Value Gap (FVG) Entry")
 
 with c2:
-    # THE DEEP LINK BUTTON
-    # This tries to open the MT5 App on your phone
-    st.link_button("🚀 OPEN MT5 APP", "metatrader5://")
+    st.subheader("⚡ Momentum Gauge")
+    components.html(f"""
+    <div class="tradingview-widget-container">
+      <div class="tradingview-widget-container__widget"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js" async>
+      {{
+      "interval": "{timeframe}m",
+      "width": "100%",
+      "isTransparent": false,
+      "height": 400,
+      "symbol": "{tv_symbol}",
+      "showIntervalTabs": false,
+      "locale": "en",
+      "colorTheme": "dark"
+      }}
+      </script>
+    </div>
+    """, height=400)
 
+# --- 7. EXECUTION ---
+st.divider()
+st.link_button("🚀 EXECUTE ON MT5", "metatrader5://", use_container_width=True)
