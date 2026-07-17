@@ -8,3 +8,4 @@ pytz
 yfinance
 python_deriv_api
 websockets
+pandas_ta
