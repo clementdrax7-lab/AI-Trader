@@ -4,3 +4,4 @@ numpy
 plotly
 websockets
 scikit-learn
+pytz

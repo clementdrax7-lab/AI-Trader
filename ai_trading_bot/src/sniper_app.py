@@ -5,135 +5,124 @@ from datetime import datetime
 import pytz
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="Sniper Institutional", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="Sniper Structure Hunter", layout="wide", page_icon="🦅")
 
-# --- 2. KILLZONE LOGIC ENGINE (The "ICT Clock") ---
-def get_ict_status():
-    # Convert current time to New York Time (EST)
-    tz_ny = pytz.timezone('US/Eastern')
-    now_ny = datetime.now(tz_ny)
-    current_hour = now_ny.hour
-    
-    # Define Killzones (24h format)
-    status = "NO TRADE ZONE 💤"
-    color = "off"
-    
-    # Asian Range (20:00 - 00:00)
-    if 20 <= current_hour <= 23:
-        status = "ASIAN RANGE (Accumulation) 🟡"
-        color = "normal"
-    # London Open (02:00 - 05:00)
-    elif 2 <= current_hour < 5:
-        status = "LONDON KILLZONE (Manipulation) 🔴"
-        color = "off" # Streamlit metric color style
-    # NY Open (07:00 - 10:00)
-    elif 7 <= current_hour < 10:
-        status = "NY KILLZONE (Distribution) 🟢"
-        color = "normal"
-    # London Close (10:00 - 12:00)
-    elif 10 <= current_hour < 12:
-        status = "LONDON CLOSE (Reversal Risk) 🟠"
-        color = "off"
-        
-    return status, now_ny.strftime("%H:%M EST")
+# --- 2. SIDEBAR ---
+st.sidebar.header("🦅 Sniper Settings")
 
-# --- 3. SIDEBAR SETTINGS ---
-st.sidebar.header("🏦 Institutional Settings")
-
-# Asset Mapping
 ASSET_MAP = {
-    "Volatility 75 Index": "DERIV:VOLATILITY_75_INDEX",
-    "Volatility 100 Index": "DERIV:VOLATILITY_100_INDEX",
+    "Crash 1000 Index": "DERIV:CRASH_1000_INDEX",
+    "Crash 500 Index": "DERIV:CRASH_500_INDEX",
+    "Boom 1000 Index": "DERIV:BOOM_1000_INDEX",
+    "Boom 500 Index": "DERIV:BOOM_500_INDEX",
+    "Volatility 100": "DERIV:VOLATILITY_100_INDEX",
+    "Volatility 75": "DERIV:VOLATILITY_75_INDEX",
     "Gold / USD": "OANDA:XAUUSD",
-    "EUR / USD": "FX:EURUSD",
-    "GBP / USD": "FX:GBPUSD",
-    "US 30 (Dow)": "TVC:DJI",
-    "Boom 1000": "DERIV:BOOM_1000_INDEX",
-    "Crash 1000": "DERIV:CRASH_1000_INDEX"
+    "EUR / USD": "FX:EURUSD"
 }
 
-selected_name = st.sidebar.selectbox("🎯 Target Asset", list(ASSET_MAP.keys()))
+selected_name = st.sidebar.selectbox("🎯 Asset Class", list(ASSET_MAP.keys()))
 tv_symbol = ASSET_MAP[selected_name]
-timeframe = st.sidebar.select_slider("⏳ Timeframe", options=["1", "5", "15", "60", "240", "D"], value="15")
+timeframe = st.sidebar.select_slider("⏳ Timeframe", options=["1", "5", "15", "60", "240"], value="15")
 
-# --- 4. THE DASHBOARD ---
-st.title(f"🏦 Smart Money Terminal: {selected_name}")
+# --- 3. KILLZONE LOGIC ---
+def get_session_status():
+    tz_ny = pytz.timezone('US/Eastern')
+    now_ny = datetime.now(tz_ny)
+    hour = now_ny.hour
+    
+    if 7 <= hour < 11: return "NY KILLZONE (High Volatility) 🟢"
+    if 2 <= hour < 5: return "LONDON OPEN (Judas Swing) 🔴"
+    if 20 <= hour <= 23: return "ASIAN RANGE (Consolidation) 🟡"
+    return "OFF HOURS (Low Prob) 💤"
 
-# A. The Killzone Monitor (Live Data)
-ict_status, ny_time = get_ict_status()
+# --- 4. MAIN LAYOUT ---
+st.title(f"🦅 Structure Hunter: {selected_name}")
 
-# Metrics Row
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("NY Time (EST)", ny_time)
-m2.metric("Current Session", ict_status)
-m3.metric("Bias", "Check Structure 🔭")
-m4.metric("Volume", "Analyzing... 📊")
+# TOP METRICS
+m1, m2, m3 = st.columns(3)
+m1.metric("Market Session", get_session_status())
+m2.metric("Target Pattern", "Liquidity Grab + Rejection")
+m3.metric("Strategy", "Buy at Demand / Sell at Supply")
 
-# --- 5. THE CHART (With Volume Pre-Loaded) ---
-# We enable 'hide_side_toolbar': false so you can draw your OWN boxes.
-tv_chart_code = f"""
-<div class="tradingview-widget-container" style="height: 650px; width: 100%">
-  <div id="tradingview_chart" style="height: calc(100% - 32px); width: 100%"></div>
-  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-  <script type="text/javascript">
-  new TradingView.widget(
-  {{
-    "autosize": true,
-    "symbol": "{tv_symbol}",
-    "interval": "{timeframe}",
-    "timezone": "America/New_York",
-    "theme": "dark",
-    "style": "1",
-    "locale": "en",
-    "toolbar_bg": "#f1f3f6",
-    "enable_publishing": false,
-    "allow_symbol_change": true,
-    "hide_side_toolbar": false,
-    "container_id": "tradingview_chart",
-    "studies": [
-      "Volume@tv-basicstudies", 
-      "RSI@tv-basicstudies",
-      "MASimple@tv-basicstudies"
-    ]
-  }}
-  );
-  </script>
-</div>
-"""
-components.html(tv_chart_code, height=700)
-
-# --- 6. ICT CONFLUENCE CHECKLIST ---
-st.divider()
-c1, c2 = st.columns([1, 2])
+# --- 5. THE WORKSTATION (Chart + Validator) ---
+c1, c2 = st.columns([3, 1]) # Chart is 3x wider than sidebar
 
 with c1:
-    st.subheader("📝 Entry Checklist")
-    st.write("Confirm these before execution:")
-    st.checkbox("1. Liquidity Sweep (Turtle Soup)")
-    st.checkbox("2. Market Structure Shift (MSS)")
-    st.checkbox("3. Return to Order Block (OB)")
-    st.checkbox("4. Fair Value Gap (FVG) Entry")
-
-with c2:
-    st.subheader("⚡ Momentum Gauge")
-    components.html(f"""
-    <div class="tradingview-widget-container">
-      <div class="tradingview-widget-container__widget"></div>
-      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-technical-analysis.js" async>
+    # LIVE TRADINGVIEW WIDGET (With Drawing Toolbar Enabled)
+    st.markdown("### 📊 Live Market Structure")
+    tv_chart_code = f"""
+    <div class="tradingview-widget-container" style="height: 700px; width: 100%">
+      <div id="tradingview_chart" style="height: calc(100% - 32px); width: 100%"></div>
+      <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+      <script type="text/javascript">
+      new TradingView.widget(
       {{
-      "interval": "{timeframe}m",
-      "width": "100%",
-      "isTransparent": false,
-      "height": 400,
-      "symbol": "{tv_symbol}",
-      "showIntervalTabs": false,
-      "locale": "en",
-      "colorTheme": "dark"
+        "autosize": true,
+        "symbol": "{tv_symbol}",
+        "interval": "{timeframe}",
+        "timezone": "Etc/UTC",
+        "theme": "dark",
+        "style": "1",
+        "locale": "en",
+        "toolbar_bg": "#f1f3f6",
+        "enable_publishing": false,
+        "allow_symbol_change": true,
+        "hide_side_toolbar": false,
+        "container_id": "tradingview_chart",
+        "studies": [
+          "Volume@tv-basicstudies", 
+          "RSI@tv-basicstudies"
+        ]
       }}
+      );
       </script>
     </div>
-    """, height=400)
+    """
+    components.html(tv_chart_code, height=700)
 
-# --- 7. EXECUTION ---
+with c2:
+    st.markdown("### ✅ Entry Validator")
+    st.info("Match the setup in your screenshot:")
+    
+    # THE CHECKLIST
+    c_structure = st.checkbox("1. Hit Support Zone? (The Box)")
+    c_sweep = st.checkbox("2. Liquidity Sweep? (Wick)")
+    c_candle = st.checkbox("3. Strong Green Candle?")
+    c_fvg = st.checkbox("4. Left a Fair Value Gap?")
+    
+    # PROBABILITY CALCULATOR
+    score = sum([c_structure, c_sweep, c_candle, c_fvg])
+    
+    st.divider()
+    if score == 4:
+        st.success("⭐⭐⭐⭐⭐ GOD TIER SETUP")
+        st.markdown("**ACTION: FULL MARGIN BUY**")
+    elif score == 3:
+        st.warning("⭐⭐⭐ Good Setup")
+        st.markdown("**ACTION: Normal Risk**")
+    elif score < 3:
+        st.error("❌ NO TRADE")
+        st.markdown("Wait for cleaner structure.")
+
+    st.divider()
+    st.markdown("### 💰 Risk Calc")
+    balance = st.number_input("Account Balance ($)", value=100)
+    risk_pct = st.slider("Risk %", 1, 10, 2)
+    sl_pips = st.number_input("Stop Loss (Points)", value=10)
+    
+    if sl_pips > 0:
+        risk_amount = balance * (risk_pct / 100)
+        lot_size = risk_amount / sl_pips
+        st.write(f"💵 Risk: **${risk_amount:.2f}**")
+        st.write(f"📉 Max Lot Size: **{lot_size:.3f}**")
+
+# --- 6. EXECUTION ---
 st.divider()
-st.link_button("🚀 EXECUTE ON MT5", "metatrader5://", use_container_width=True)
+st.subheader("🚀 Execution Deck")
+col_a, col_b = st.columns(2)
+with col_a:
+    st.markdown("##### 1. Analyze Chart Above")
+    st.markdown("Look for the **'W' Pattern** or **Spike Rejection**.")
+with col_b:
+    st.link_button("🚀 OPEN MT5 & EXECUTE", "metatrader5://", use_container_width=True)
