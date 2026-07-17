@@ -1,9 +1,9 @@
 streamlit
 pandas
-plotly
 numpy<2.0.0
+plotly
 yfinance
 pytz
-python-deriv-api
+deriv-api
 websockets
-pandas-ta
+
