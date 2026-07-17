@@ -46,34 +46,42 @@ def fetch_and_analyze(asset_key, brain):
     elif "EUR" in asset_key:
         df = yf.download("EURUSD=X", period="1d", interval="15m", progress=False)
     else:
-        # Synthetic Simulation for Deriv (Since YF doesn't have Vol75)
+        # Synthetic Simulation for Deriv
+        # FIX: Ensure periods match exactly
         dates = pd.date_range(end=datetime.now(), periods=100, freq="15min")
-        prices = [1000]
+        prices = [1000.0] # <--- FIXED: Initialized with a float value
         for i in range(99):
             change = np.random.normal(0, 5)
             prices.append(prices[-1] + change)
-        df = pd.DataFrame(prices, index=dates, columns=["Close"])
+            
+        df = pd.DataFrame({'Close': prices}, index=dates)
         df["Open"] = df["Close"].shift(1)
         df["High"] = df[["Open", "Close"]].max(axis=1) + 2
         df["Low"] = df[["Open", "Close"]].min(axis=1) - 2
-        df.iloc = df.iloc # Fix NaN
+        df.fillna(method='bfill', inplace=True) # FIX: Handle NaNs safely
 
-    if df is None or df.empty:
+    if df is None or len(df) < 10:
         return None
 
     # 2. RUN LOGIC (The Neural Check)
     last = df.iloc[-1]
-    prev = df.iloc[-2]
     
     # Auto-Detect Liquidity Sweep (Long Wicks)
     body = abs(last['Close'] - last['Open'])
     lower_wick = abs(last['Low'] - min(last['Close'], last['Open']))
+    
+    # Avoid ZeroDivisionError
+    if body == 0: body = 0.1
+    
     has_sweep = lower_wick > (body * 1.5)
     
     # Auto-Detect Momentum (RSI)
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    
+    # Handle Division by Zero in RSI
+    loss = loss.replace(0, 0.001)
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     current_rsi = rsi.iloc[-1]
@@ -83,14 +91,14 @@ def fetch_and_analyze(asset_key, brain):
     if has_sweep: score += (30 * brain["sweep_weight"])
     if current_rsi < 30 or current_rsi > 70: score += (25 * brain["rsi_weight"])
     
+    # Cap score at 99
     return {
         "sweep": has_sweep,
         "rsi": current_rsi,
-        "score": min(99, score)
+        "score": min(99.0, score)
     }
 
 # --- 4. ASSET MAPPING ---
-# Maps the Name to BOTH TradingView (Display) and Python (Logic)
 ASSETS = {
     "Gold / USD": {"tv": "OANDA:XAUUSD", "id": "Gold"},
     "EUR / USD": {"tv": "FX:EURUSD", "id": "EUR"},
@@ -110,7 +118,6 @@ asset_data = ASSETS[selected_name]
 brain = load_brain()
 
 st.title(f"🧠 Hybrid Terminal: {selected_name}")
-st.caption(f"AI Experience: {brain['wins']} Wins / {brain['losses']} Losses")
 
 # LAYOUT: Chart on Top, Brain on Bottom
 # -------------------------------------
@@ -159,7 +166,7 @@ analysis = fetch_and_analyze(asset_data['id'], brain)
 with col1:
     st.info("🔎 **Automated Pattern Scan**")
     if analysis:
-        st.checkbox("Liquidity Sweep (Auto-Detected)", value=analysis["sweep"], disabled=True)
+        st.checkbox("Liquidity Sweep (Auto-Detected)", value=bool(analysis["sweep"]), disabled=True)
         st.metric("RSI Momentum", f"{analysis['rsi']:.1f}", delta="Extreme" if analysis['score'] > 20 else "Neutral")
     else:
         st.warning("Data Feed Loading...")
@@ -185,12 +192,12 @@ with col3:
     if c_yes.button("WON 💰"):
         train_brain("WIN")
         st.toast("Brain Updated: Logic Reinforced (+)")
-        st.rerun()
+        st.experimental_rerun()
         
     if c_no.button("LOST 🔻"):
         train_brain("LOSS")
         st.toast("Brain Updated: Logic Adjusted (-)")
-        st.rerun()
+        st.experimental_rerun()
 
 # C. EXECUTION
 st.divider()
