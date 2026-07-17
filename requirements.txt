@@ -1,9 +1,8 @@
 streamlit
-pandas
-numpy<2.0.0
-plotly
+pandas==2.2.2
+numpy==1.26.4
 yfinance
-pytz
+plotly
 deriv-api
 websockets
 
