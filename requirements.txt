@@ -6,3 +6,5 @@ websockets
 scikit-learn
 pytz
 yfinance
+python_deriv_api
+websockets

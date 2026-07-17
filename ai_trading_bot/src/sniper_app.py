@@ -5,199 +5,191 @@ import numpy as np
 import yfinance as yf
 import json
 import os
+import asyncio
+from deriv_api import DerivAPI
 from datetime import datetime
 import pytz
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="Sniper AI Pro", layout="wide", page_icon="🎯")
+st.set_page_config(page_title="Deriv Linux Sniper", layout="wide", page_icon="🐧")
 
-# --- 2. THE BRAIN (Self-Learning System) ---
-BRAIN_FILE = "sniper_brain.json"
+# --- 2. DERIV EXECUTION ENGINE (Linux Compatible) ---
+async def execute_deriv_trade(token, symbol, action, amount=10):
+    """
+    Connects directly to Deriv API (No MT5 needed) and places a trade.
+    """
+    # 1. Init API
+    api = DerivAPI(app_id=1089) # Default App ID
+    
+    try:
+        # 2. Authorize
+        authorize = await api.authorize(token)
+        if authorize.get('error'):
+            return f"❌ Auth Failed: {authorize['error']['message']}"
+            
+        # 3. Get Proposal (Quote)
+        # We Map "Volatility 75" to "R_75" for the API
+        symbol_map = {
+            "Volatility 100 Index": "R_100",
+            "Volatility 75 Index": "R_75", 
+            "Volatility 50 Index": "R_50",
+            "Gold / USD": "frxXAUUSD",
+            "EUR / USD": "frxEURUSD"
+        }
+        api_symbol = symbol_map.get(symbol, "R_100")
+        
+        contract_type = "CALL" if action == "BUY" else "PUT"
+        
+        proposal = await api.proposal({
+            "proposal": 1,
+            "amount": amount,
+            "barrier": "+0.1" if action == "BUY" else "-0.1",
+            "basis": "stake",
+            "contract_type": contract_type,
+            "currency": "USD",
+            "duration": 5,
+            "duration_unit": "t", # 5 Ticks (Scalping)
+            "symbol": api_symbol
+        })
+        
+        if proposal.get('error'):
+            return f"❌ Proposal Error: {proposal['error']['message']}"
+            
+        # 4. Execute Buy
+        proposal_id = proposal['proposal']['id']
+        buy = await api.buy({"buy": proposal_id, "price": amount})
+        
+        if buy.get('error'):
+            return f"❌ Trade Failed: {buy['error']['message']}"
+            
+        return f"✅ SUCCESS! Trade ID: {buy['buy']['contract_id']}"
 
-def load_brain():
-    if not os.path.exists(BRAIN_FILE):
-        return {"fvg_weight": 1.0, "sweep_weight": 1.2, "rsi_weight": 1.0, "wins": 0, "losses": 0}
-    with open(BRAIN_FILE, "r") as f:
-        return json.load(f)
-
-def save_brain(brain_data):
-    with open(BRAIN_FILE, "w") as f:
-        json.dump(brain_data, f)
-
-def train_brain(result):
-    brain = load_brain()
-    if result == "WIN":
-        brain["wins"] += 1
-        brain["fvg_weight"] += 0.1  
-        brain["sweep_weight"] += 0.1
-    else:
-        brain["losses"] += 1
-        brain["fvg_weight"] -= 0.05 
-        brain["sweep_weight"] -= 0.05
-    save_brain(brain)
-    return brain
+    except Exception as e:
+        return f"❌ System Error: {str(e)}"
+    finally:
+        await api.disconnect()
 
 # --- 3. DATA & LOGIC ENGINE ---
-def fetch_and_analyze(asset_key, brain):
+def fetch_and_analyze(asset_key):
     df = None
-    
-    # 1. FETCH DATA (Real vs Synthetic)
     try:
         if "Gold" in asset_key:
-            # FIX 1: Fetch Data and FLATTEN columns immediately
             df = yf.download("GC=F", period="1d", interval="15m", progress=False)
             if not df.empty and isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
-                
-        elif "EUR" in asset_key:
-            df = yf.download("EURUSD=X", period="1d", interval="15m", progress=False)
-            if not df.empty and isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-                
         else:
-            # Synthetic Simulation (Deriv)
+            # Synthetic Simulation
             dates = pd.date_range(end=datetime.now(), periods=100, freq="15min")
-            # FIX 2: Correct List Initialization
-            prices = [1000.0] 
+            prices = [1000.0]
             for i in range(99):
-                change = np.random.normal(0, 5)
-                prices.append(prices[-1] + change)
-                
+                prices.append(prices[-1] + np.random.normal(0, 5))
             df = pd.DataFrame({'Close': prices}, index=dates)
             df["Open"] = df["Close"].shift(1)
             df["High"] = df[["Open", "Close"]].max(axis=1) + 2
             df["Low"] = df[["Open", "Close"]].min(axis=1) - 2
             df.fillna(method='bfill', inplace=True)
-            
-    except Exception as e:
+
+        if df is None or len(df) < 20: return None
+
+        # Analyze
+        last = df.iloc[-1]
+        close = float(last['Close'])
+        sma = df['Close'].rolling(14).mean().iloc[-1]
+        
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(14).mean().replace(0, 0.001)
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        current_rsi = float(rsi.iloc[-1])
+        
+        score = 50
+        if close > sma: score += 10
+        if current_rsi < 30: score += 30
+        if current_rsi > 70: score -= 30
+        
+        return {"score": min(99, max(1, score)), "rsi": current_rsi}
+
+    except Exception:
         return None
 
-    if df is None or len(df) < 10:
-        return None
-
-    # 2. RUN LOGIC
-    # FIX 3: Force values to be simple floats to prevent Series errors
-    last = df.iloc[-1]
-    close_price = float(last['Close'])
-    open_price = float(last['Open'])
-    low_price = float(last['Low'])
-    
-    # Logic: Liquidity Sweep
-    body = abs(close_price - open_price)
-    lower_wick = abs(low_price - min(close_price, open_price))
-    
-    # Avoid ZeroDivision
-    if body == 0: body = 0.1
-    has_sweep = lower_wick > (body * 1.5)
-    
-    # Logic: RSI
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    loss = loss.replace(0, 0.001) # Safety
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    current_rsi = float(rsi.iloc[-1])
-    
-    # Score Calculation
-    score = 0
-    if has_sweep: score += (30 * brain["sweep_weight"])
-    if current_rsi < 30 or current_rsi > 70: score += (25 * brain["rsi_weight"])
-    
-    return {
-        "sweep": has_sweep,
-        "rsi": current_rsi,
-        "score": min(99.0, score)
-    }
-
-# --- 4. ASSET MAPPING ---
+# --- 4. UI LAYOUT ---
+st.sidebar.header("🐧 Linux Sniper")
 ASSETS = {
-    "Gold / USD": {"tv": "OANDA:XAUUSD", "id": "Gold"},
-    "EUR / USD": {"tv": "FX:EURUSD", "id": "EUR"},
-    "Volatility 75": {"tv": "DERIV:VOLATILITY_75_INDEX", "id": "Vol75"},
-    "Volatility 100": {"tv": "DERIV:VOLATILITY_100_INDEX", "id": "Vol100"},
-    "Boom 1000": {"tv": "DERIV:BOOM_1000_INDEX", "id": "Boom1000"},
-    "Crash 1000": {"tv": "DERIV:CRASH_1000_INDEX", "id": "Crash1000"},
+    "Volatility 75 Index": {"tv": "DERIV:VOLATILITY_75_INDEX", "id": "Vol75"},
+    "Volatility 100 Index": {"tv": "DERIV:VOLATILITY_100_INDEX", "id": "Vol100"},
+    "Gold / USD": {"tv": "OANDA:XAUUSD", "id": "Gold"}
 }
-
-# --- 5. UI LAYOUT ---
-st.sidebar.header("👁️ Sniper Controls")
 selected_name = st.sidebar.selectbox("Asset", list(ASSETS.keys()))
-timeframe = st.sidebar.select_slider("Timeframe", options=["1", "5", "15", "60", "240"], value="15")
-asset_data = ASSETS[selected_name]
+stake = st.sidebar.number_input("Stake Amount ($)", value=10.0)
+token = st.secrets["DERIV_TOKEN"] if "DERIV_TOKEN" in st.secrets else ""
 
-brain = load_brain()
-
-st.title(f"🧠 Hybrid Terminal: {selected_name}")
+st.title(f"🚀 Direct Execution: {selected_name}")
 
 # A. CHART
-st.markdown("### 📊 Institutional Chart")
-tv_code = f"""
-<div class="tradingview-widget-container" style="height: 600px; width: 100%">
-  <div id="tradingview_chart" style="height: calc(100% - 32px); width: 100%"></div>
+asset_data = ASSETS[selected_name]
+components.html(f"""
+<div class="tradingview-widget-container" style="height: 500px; width: 100%">
+  <div id="tradingview_chart" style="height: 100%; width: 100%"></div>
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
   <script type="text/javascript">
   new TradingView.widget(
   {{
     "autosize": true,
     "symbol": "{asset_data['tv']}",
-    "interval": "{timeframe}",
-    "timezone": "Etc/UTC",
+    "interval": "15",
     "theme": "dark",
     "style": "1",
     "locale": "en",
     "toolbar_bg": "#f1f3f6",
     "enable_publishing": false,
-    "allow_symbol_change": true,
-    "hide_side_toolbar": false, 
-    "container_id": "tradingview_chart",
-    "studies": [
-      "RSI@tv-basicstudies",
-      "MASimple@tv-basicstudies"
-    ]
+    "hide_side_toolbar": false,
+    "container_id": "tradingview_chart"
   }}
   );
   </script>
 </div>
-"""
-components.html(tv_code, height=600)
+""", height=500)
 
+# B. ANALYSIS & EXECUTION
 st.divider()
+c1, c2 = st.columns(2)
 
-# B. LOGIC
-st.subheader("🧠 Neural Analysis (Background Processor)")
-col1, col2, col3 = st.columns(3)
+analysis = fetch_and_analyze(asset_data['id'])
+score = analysis['score'] if analysis else 50
+rsi = analysis['rsi'] if analysis else 50
 
-analysis = fetch_and_analyze(asset_data['id'], brain)
+with c1:
+    st.subheader("🧠 AI Signal")
+    st.metric("Win Probability", f"{score:.1f}%", delta="Bullish" if score > 50 else "Bearish")
+    st.progress(score/100)
 
-with col1:
-    st.info("🔎 **Pattern Scan**")
-    if analysis:
-        st.checkbox("Liquidity Sweep", value=bool(analysis["sweep"]), disabled=True)
-        st.metric("RSI Momentum", f"{analysis['rsi']:.1f}")
+with c2:
+    st.subheader("⚡ Direct Trade (Real Money)")
+    if token == "":
+        st.error("⚠️ Token Missing in Secrets!")
     else:
-        st.warning("Initializing Data Feed...")
+        col_buy, col_sell = st.columns(2)
+        
+        # BUY BUTTON
+        if col_buy.button("🟢 BUY CALL", use_container_width=True):
+            with st.spinner("Sending Order to Deriv..."):
+                # Run the Async function in Streamlit
+                result = asyncio.run(execute_deriv_trade(token, selected_name, "BUY", stake))
+                if "SUCCESS" in result:
+                    st.balloons()
+                    st.success(result)
+                else:
+                    st.error(result)
 
-with col2:
-    st.info("🤖 **AI Probability**")
-    if analysis:
-        score = analysis['score']
-        st.metric("Win Chance", f"{score:.1f}%")
-        if score > 75: st.success("✅ HIGH PROBABILITY")
-        elif score > 50: st.warning("⚠️ MODERATE")
-        else: st.error("❌ LOW PROBABILITY")
+        # SELL BUTTON
+        if col_sell.button("🔴 SELL PUT", use_container_width=True):
+            with st.spinner("Sending Order to Deriv..."):
+                result = asyncio.run(execute_deriv_trade(token, selected_name, "SELL", stake))
+                if "SUCCESS" in result:
+                    st.balloons()
+                    st.success(result)
+                else:
+                    st.error(result)
 
-with col3:
-    st.info("🎓 **Teach AI**")
-    c_yes, c_no = st.columns(2)
-    if c_yes.button("WIN 💰"):
-        train_brain("WIN")
-        st.toast("Brain Logic Reinforced (+)")
-        st.experimental_rerun()
-    if c_no.button("LOSS 🔻"):
-        train_brain("LOSS")
-        st.toast("Brain Logic Adjusted (-)")
-        st.experimental_rerun()
-
-st.divider()
-st.link_button("🚀 OPEN MT5 TO EXECUTE", "metatrader5://", use_container_width=True)
+st.info("ℹ️ NOTE: This uses the 'Deriv API'. It executes directly on the server. No MT5 required.")
