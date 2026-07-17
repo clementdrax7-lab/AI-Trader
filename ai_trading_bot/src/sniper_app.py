@@ -1,26 +1,19 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
-import numpy as np
 import asyncio
 import json
 import os
 from deriv_api import DerivAPI
-from datetime import datetime
+from datetime import datetime, timezone
 
 # --- 1. CONFIGURATION & APP-LIKE UI ---
 st.set_page_config(page_title="Sniper Glass", layout="wide", page_icon="💎", initial_sidebar_state="collapsed")
 
-# --- CSS INJECTION (The "Instagram/YouTube" UI) ---
+# --- CSS INJECTION ---
 st.markdown("""
     <style>
-        /* 1. APP BACKGROUND (OLED Black) */
-        .stApp {
-            background-color: #000000;
-            font-family: 'Helvetica Neue', sans-serif;
-        }
-        
-        /* 2. GLASS CARDS */
+        .stApp { background-color: #000000; font-family: 'Helvetica Neue', sans-serif; }
         .glass-card {
             background: rgba(20, 20, 20, 0.9);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -30,58 +23,27 @@ st.markdown("""
             backdrop-filter: blur(10px);
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
-        
-        /* 3. STATUS BAR (Sticky Top) */
         .status-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 5px;
-            border-bottom: 1px solid #333;
-            margin-bottom: 20px;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 5px; border-bottom: 1px solid #333; margin-bottom: 20px;
         }
-        
-        /* 4. MODERN TYPOGRAPHY */
         h1, h2, h3 { color: white !important; font-weight: 800 !important; letter-spacing: -0.5px; }
         p { color: #888; font-size: 14px; }
-        
-        /* 5. ACTION BUTTON (YouTube Red / Insta Gradient) */
         button[kind="primary"] {
             background: linear-gradient(135deg, #FF0000 0%, #CC0000 100%);
-            color: white;
-            border: none;
-            border-radius: 30px;
-            height: 60px;
-            width: 100%;
-            font-size: 18px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            box-shadow: 0 5px 20px rgba(255, 0, 0, 0.3);
-            transition: transform 0.2s;
+            color: white; border: none; border-radius: 30px; height: 60px; width: 100%;
+            font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+            box-shadow: 0 5px 20px rgba(255, 0, 0, 0.3); transition: transform 0.2s;
         }
         button[kind="primary"]:hover { transform: scale(1.02); }
-        
-        /* 6. PILLS */
-        .pill {
-            padding: 5px 12px;
-            border-radius: 50px;
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-        }
+        .pill { padding: 5px 12px; border-radius: 50px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
         .pill-green { background: #003300; color: #00FF00; border: 1px solid #00FF00; }
         .pill-red { background: #330000; color: #FF0000; border: 1px solid #FF0000; }
-        
-        /* HIDE STREAMLIT ELEMENTS */
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
-        
+        #MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. THE BRAIN (V19 Logic) ---
+# --- 2. THE BRAIN ---
 BRAIN_FILE = "sniper_brain.json"
 
 def load_brain():
@@ -111,12 +73,10 @@ async def auto_learn_from_history(token):
                 profit = float(trade['sell_price']) - float(trade['buy_price'])
                 if profit > 0:
                     brain["wins"] += 1
-                    # Winning? Widen range slightly
                     brain["rsi_limit_low"] = min(30, brain["rsi_limit_low"] + 0.2)
                     brain["rsi_limit_high"] = max(70, brain["rsi_limit_high"] - 0.2)
                 else:
                     brain["losses"] += 1
-                    # Losing? Tighten range
                     brain["rsi_limit_low"] -= 0.5
                     brain["rsi_limit_high"] += 0.5
                 brain['processed_ids'].append(tid)
@@ -127,27 +87,21 @@ async def auto_learn_from_history(token):
     except: pass
     finally: await api.disconnect()
 
-# --- 3. MATH ENGINE (Native) ---
+# --- 3. MATH ENGINE ---
 def add_indicators(df):
-    # RSI
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(14).mean().replace(0, 0.001)
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
-    
-    # EMA 200
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
-    
-    # Bollinger Bands
     df['SMA_20'] = df['close'].rolling(20).mean()
     df['STD_20'] = df['close'].rolling(20).std()
     df['BB_UPPER'] = df['SMA_20'] + (df['STD_20'] * 2)
     df['BB_LOWER'] = df['SMA_20'] - (df['STD_20'] * 2)
-    
     return df
 
-# --- 4. DATA & EXECUTION ---
+# --- 4. DATA & EXECUTION (Pure Deriv) ---
 async def get_market_data(symbol_api):
     api = DerivAPI(app_id=1089)
     try:
@@ -187,7 +141,7 @@ async def execute_tri_strike(token, symbol_api, direction, stake, count):
     except: return ["❌ System Error"]
     finally: await api.disconnect()
 
-# --- 5. CLEAN SETUP LOGIC (The Pinbar Protocol) ---
+# --- 5. LOGIC ENGINE (Pinbar) ---
 def analyze_setup(df, asset_name, brain):
     if df is None or df.empty: return "WAIT", 0, "No Data"
     last = df.iloc[-1]
@@ -202,18 +156,15 @@ def analyze_setup(df, asset_name, brain):
     bb_lower = last['BB_LOWER']
     bb_upper = last['BB_UPPER']
     
-    signal, score, reason = "WAIT", 50, "Scanning Pattern..."
+    signal, score, reason = "WAIT", 50, "Scanning..."
     
-    # 1. PINBAR CALCULATION (The Clean Setup)
+    # 1. PINBAR CALCULATION
     body_size = abs(close - open_p)
     if body_size == 0: body_size = 0.01
-    
     lower_wick = min(close, open_p) - low
     upper_wick = high - max(close, open_p)
     
-    # Hammer (Buy): Lower wick is 2x bigger than body
     is_hammer = lower_wick > (body_size * 2)
-    # Shooting Star (Sell): Upper wick is 2x bigger than body
     is_star = upper_wick > (body_size * 2)
 
     # 2. LOGIC MATCH
@@ -222,23 +173,17 @@ def analyze_setup(df, asset_name, brain):
     elif "Crash" in asset_name:
         if rsi > 80: signal, score, reason = "SELL", 98, "Crash Spike Zone"
     else:
-        # UNIVERSAL "CLEAN" LOGIC
-        # Buy: Uptrend + Oversold + Hammer at BB Lower
         bb_touch_buy = low <= bb_lower
-        
         if rsi < brain['rsi_limit_low'] and close > ema and bb_touch_buy and is_hammer:
             signal, score, reason = "BUY", 99, "🔥 CLEAN PINBAR REJECTION"
         
-        # Sell: Downtrend + Overbought + Star at BB Upper
         bb_touch_sell = high >= bb_upper
-        
         if rsi > brain['rsi_limit_high'] and close < ema and bb_touch_sell and is_star:
             signal, score, reason = "SELL", 99, "🔥 CLEAN PINBAR REJECTION"
             
     return signal, score, reason
 
-# --- 6. UI CONSTRUCTION (The "Instagram" Layout) ---
-
+# --- 6. UI CONSTRUCTION ---
 ASSETS = {
     "Gold / USD": {"api": "frxXAUUSD", "tv": "OANDA:XAUUSD"},
     "Volatility 100": {"api": "R_100", "tv": "DERIV:VOLATILITY_100_INDEX"},
@@ -250,28 +195,19 @@ token = st.secrets["DERIV_TOKEN"] if "DERIV_TOKEN" in st.secrets else ""
 if token: asyncio.run(auto_learn_from_history(token))
 brain = load_brain()
 
-# 1. STATUS BAR
 st.markdown(f"""
     <div class="status-bar">
-        <div>
-            <span style="font-size: 20px;">💎</span> 
-            <span style="font-weight: 800; font-size: 18px; color: white;">SNIPER</span>
-        </div>
-        <div>
-            <span class="pill pill-green">{brain['wins']} W</span>
-            <span class="pill pill-red">{brain['losses']} L</span>
-        </div>
+        <div><span style="font-size: 20px;">💎</span> <span style="font-weight: 800; font-size: 18px; color: white;">SNIPER</span></div>
+        <div><span class="pill pill-green">{brain['wins']} W</span> <span class="pill pill-red">{brain['losses']} L</span></div>
     </div>
 """, unsafe_allow_html=True)
 
-# 2. CONTROLS (Top Bar)
-c1, c2, c3 = st.columns([2, 1, 1])
+c1, c2, c3 = st.columns()
 selected_name = c1.selectbox("MARKET", list(ASSETS.keys()), label_visibility="collapsed")
-entry_count = c2.select_slider("STACK", options=[1, 2, 3], value=1, label_visibility="collapsed")
+entry_count = c2.select_slider("STACK", options=[1,2,3], value=1, label_visibility="collapsed")
 stake = c3.number_input("STAKE", value=10.0, label_visibility="collapsed")
 asset_data = ASSETS[selected_name]
 
-# 3. CHART CARD
 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
 components.html(f"""
 <div class="tradingview-widget-container" style="height: 450px; width: 100%; border-radius: 15px; overflow: hidden;">
@@ -279,28 +215,15 @@ components.html(f"""
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
   <script type="text/javascript">
   new TradingView.widget(
-  {{
-    "autosize": true,
-    "symbol": "{asset_data['tv']}",
-    "interval": "5",
-    "theme": "dark",
-    "style": "1",
-    "locale": "en",
-    "toolbar_bg": "#f1f3f6",
-    "enable_publishing": false,
-    "hide_side_toolbar": false,
-    "studies": ["RSI@tv-basicstudies", "BB@tv-basicstudies"],
-    "container_id": "tradingview_chart"
-  }}
+  {{ "autosize": true, "symbol": "{asset_data['tv']}", "interval": "5", "theme": "dark", "style": "1", "locale": "en", "toolbar_bg": "#f1f3f6", "enable_publishing": false, "hide_side_toolbar": false, "studies": ["RSI@tv-basicstudies", "BB@tv-basicstudies"], "container_id": "tradingview_chart" }}
   );
   </script>
 </div>
 """, height=450)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# 4. ACTION CARD
 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-c_stat, c_btn = st.columns([1, 1])
+c_stat, c_btn = st.columns()
 
 with c_stat:
     if token:
@@ -308,23 +231,18 @@ with c_stat:
         if df is not None:
             signal, score, reason = analyze_setup(df, selected_name, brain)
             color = "#00FF00" if signal == "BUY" else "#FF0000" if signal == "SELL" else "#555"
-            
             st.markdown(f"""
-                <div>
-                    <p style="margin: 0; font-weight: bold; color: #888;">AI VERDICT</p>
-                    <h1 style="margin: 0; font-size: 36px; color: {color};">{signal}</h1>
-                    <p style="margin: 5px 0 0 0; color: white;">{reason}</p>
-                </div>
+                <div><p style="margin: 0; font-weight: bold; color: #888;">AI VERDICT</p>
+                <h1 style="margin: 0; font-size: 36px; color: {color};">{signal}</h1>
+                <p style="margin: 5px 0 0 0; color: white;">{reason}</p></div>
             """, unsafe_allow_html=True)
-            
-            # Save signal for button
             st.session_state['last_signal'] = signal
         else:
             st.markdown("<h2 style='color: #888;'>CONNECTING...</h2>", unsafe_allow_html=True)
             st.session_state['last_signal'] = "WAIT"
 
 with c_btn:
-    st.write("") # Spacer
+    st.write("") 
     if st.button("ACTIVATE SNIPER", type="primary"):
         if st.session_state.get('last_signal', 'WAIT') != "WAIT":
             with st.spinner("Executing Precision Strike..."):
@@ -332,5 +250,4 @@ with c_btn:
                 for res in results: st.success(res)
         else:
             st.toast("⚠️ No Setup Found. Patience.", icon="🦅")
-
 st.markdown('</div>', unsafe_allow_html=True)
