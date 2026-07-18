@@ -217,7 +217,8 @@ st.markdown(f"""
 
 c1, c2, c3 = st.columns()
 selected_name = c1.selectbox("MARKET", list(ASSETS.keys()), label_visibility="collapsed")
-entry_count = c2.select_slider("STACK", options=, value=1, label_visibility="collapsed")
+# FIX IS HERE: Added options=[1,2,3]
+entry_count = c2.select_slider("STACK", options=[1, 2, 3], value=1, label_visibility="collapsed")
 stake = c3.number_input("STAKE", value=10.0, label_visibility="collapsed")
 asset_data = ASSETS[selected_name]
 
