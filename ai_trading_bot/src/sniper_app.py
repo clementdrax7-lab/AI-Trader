@@ -4,13 +4,12 @@ import pandas as pd
 import asyncio
 import json
 import os
-from deriv_api import DerivAPI
+import websockets
 from datetime import datetime
 
 # --- 1. CONFIGURATION & UI ---
 st.set_page_config(page_title="Sniper Glass", layout="wide", page_icon="💎", initial_sidebar_state="collapsed")
 
-# CSS STYLING
 st.markdown("""
     <style>
         .stApp { background-color: #000000; font-family: 'Helvetica Neue', sans-serif; }
@@ -54,15 +53,25 @@ def save_brain(brain_data):
     with open(BRAIN_FILE, "w") as f:
         json.dump(brain_data, f)
 
+# --- 3. RAW SOCKET HELPER ---
+async def deriv_call(request, token=None):
+    uri = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
+    async with websockets.connect(uri) as websocket:
+        if token:
+            await websocket.send(json.dumps({"authorize": token}))
+            await websocket.recv() # Ignore auth response
+            
+        await websocket.send(json.dumps(request))
+        response = await websocket.recv()
+        return json.loads(response)
+
 async def auto_learn_from_history(token):
-    api = DerivAPI(app_id=1089)
     try:
-        await api.authorize(token)
-        history = await api.profit_table({"profit_table": 1, "description": 1, "limit": 20})
-        if history.get('error'): return
+        data = await deriv_call({"profit_table": 1, "description": 1, "limit": 20}, token)
+        if 'error' in data: return
         
         brain = load_brain()
-        transactions = history['profit_table']['transactions']
+        transactions = data['profit_table']['transactions']
         updated = False
         
         for trade in transactions:
@@ -83,9 +92,8 @@ async def auto_learn_from_history(token):
         if len(brain['processed_ids']) > 1000: brain['processed_ids'] = brain['processed_ids'][-1000:]
         if updated: save_brain(brain)
     except: pass
-    finally: await api.disconnect()
 
-# --- 3. MATH ENGINE ---
+# --- 4. DATA ENGINE ---
 def add_indicators(df):
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(14).mean()
@@ -99,44 +107,55 @@ def add_indicators(df):
     df['BB_LOWER'] = df['SMA_20'] - (df['STD_20'] * 2)
     return df
 
-# --- 4. DATA FEED ---
 async def get_market_data(symbol_api):
-    api = DerivAPI(app_id=1089)
     try:
-        candles = await api.ticks_history({
+        data = await deriv_call({
             "ticks_history": symbol_api, "adjust_start_time": 1, "count": 500, "end": "latest", "style": "candles", "granularity": 300
         })
-        if candles.get('error'): return None
-        df = pd.DataFrame(candles['candles'])
+        if 'error' in data: return None
+        
+        df = pd.DataFrame(data['candles'])
         df['time'] = pd.to_datetime(df['epoch'], unit='s')
         df.set_index('time', inplace=True)
         df[['open','high','low','close']] = df[['open','high','low','close']].astype(float)
         return add_indicators(df)
     except: return None
-    finally: await api.disconnect()
 
-# --- 5. EXECUTION ---
+# --- 5. EXECUTION ENGINE (Raw Socket) ---
 async def execute_tri_strike(token, symbol_api, direction, stake, count):
-    api = DerivAPI(app_id=1089)
     results = []
+    uri = "wss://ws.binaryws.com/websockets/v3?app_id=1089"
+    
     try:
-        await api.authorize(token)
-        contract_type = "CALL" if direction == "BUY" else "PUT"
-        safe_count = int(count)
-        for i in range(safe_count):
-            proposal = await api.proposal({
-                "proposal": 1, "amount": stake, "barrier": "+0.25" if direction == "BUY" else "-0.25",
-                "basis": "stake", "contract_type": contract_type, "currency": "USD", "duration": 5, "duration_unit": "t", "symbol": symbol_api
-            })
-            if proposal.get('error'): results.append("❌ Failed")
-            else:
-                buy = await api.buy({"buy": proposal['proposal']['id'], "price": stake})
-                if buy.get('error'): results.append("❌ Error")
-                else: results.append(f"✅ ENTRY {i+1} OPEN")
-            await asyncio.sleep(0.1)
-        return results
-    except: return ["❌ System Error"]
-    finally: await api.disconnect()
+        async with websockets.connect(uri) as websocket:
+            # 1. Authorize
+            await websocket.send(json.dumps({"authorize": token}))
+            auth_res = json.loads(await websocket.recv())
+            if 'error' in auth_res: return ["❌ Auth Failed"]
+            
+            # 2. Trade Loop
+            contract_type = "CALL" if direction == "BUY" else "PUT"
+            safe_count = int(count)
+            
+            for i in range(safe_count):
+                await websocket.send(json.dumps({
+                    "proposal": 1, "amount": stake, "barrier": "+0.25" if direction == "BUY" else "-0.25",
+                    "basis": "stake", "contract_type": contract_type, "currency": "USD", "duration": 5, "duration_unit": "t", "symbol": symbol_api
+                }))
+                prop_res = json.loads(await websocket.recv())
+                
+                if 'error' in prop_res:
+                    results.append("❌ Proposal Fail")
+                else:
+                    prop_id = prop_res['proposal']['id']
+                    await websocket.send(json.dumps({"buy": prop_id, "price": stake}))
+                    buy_res = json.loads(await websocket.recv())
+                    if 'error' in buy_res: results.append("❌ Buy Error")
+                    else: results.append(f"✅ ENTRY {i+1} OPEN")
+                await asyncio.sleep(0.1)
+                
+            return results
+    except Exception as e: return [f"❌ Error: {str(e)}"]
 
 # --- 6. LOGIC ---
 def analyze_setup(df, asset_name, brain):
