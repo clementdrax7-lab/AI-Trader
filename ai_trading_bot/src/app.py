@@ -215,9 +215,10 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-c1, c2, c3 = st.columns()
+# FIXED: Added (3) to st.columns to prevent LayoutMixing error
+c1, c2, c3 = st.columns(3)
+
 selected_name = c1.selectbox("MARKET", list(ASSETS.keys()), label_visibility="collapsed")
-# FIX IS HERE: Added options=[1,2,3]
 entry_count = c2.select_slider("STACK", options=[1, 2, 3], value=1, label_visibility="collapsed")
 stake = c3.number_input("STAKE", value=10.0, label_visibility="collapsed")
 asset_data = ASSETS[selected_name]
@@ -237,7 +238,7 @@ components.html(f"""
 st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-c_stat, c_btn = st.columns()
+c_stat, c_btn = st.columns(2)
 with c_stat:
     if token:
         df = asyncio.run(get_market_data(asset_data['api']))
