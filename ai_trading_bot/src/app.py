@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 
 # --- 1. CONFIGURATION & UI ---
-st.set_page_config(page_title="Sniper V29", layout="wide", page_icon="🛡️", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Sniper V30", layout="wide", page_icon="🛡️", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -59,6 +59,7 @@ def save_brain(brain_data):
 def get_clean_token():
     # THE SCRUBBER: Removes all quotes, spaces, and hidden chars
     raw = st.secrets.get("DERIV_TOKEN", "")
+    if raw is None: return ""
     return raw.strip().replace('"', '').replace("'", "").replace("“", "").replace("”", "")
 
 async def deriv_call(request, token=None):
@@ -215,7 +216,10 @@ brain = load_brain()
 
 st.sidebar.markdown("### ⚙️ CUSTOM SETTINGS")
 selected_name = st.sidebar.selectbox("MARKET", list(ASSETS.keys()))
-entry_count = st.sidebar.select_slider("STACK", options=, value=1)
+
+# FIX IS HERE: Added the missing list [1, 2, 3, 4, 5]
+entry_count = st.sidebar.select_slider("STACK", options=[1, 2, 3, 4, 5], value=1)
+
 stake = st.sidebar.number_input("STAKE", value=10.0)
 
 st.sidebar.divider()
@@ -236,7 +240,7 @@ asset_data = ASSETS[selected_name]
 
 st.markdown(f"""
     <div class="status-bar">
-        <div><span style="font-size: 20px;">🛡️</span> <span style="font-weight: 800; font-size: 18px; color: white;">V29 AUTO-CLEAN</span></div>
+        <div><span style="font-size: 20px;">🛡️</span> <span style="font-weight: 800; font-size: 18px; color: white;">V30 AUTO-CLEAN</span></div>
         <div><span class="pill pill-green">{brain['wins']} W</span> <span class="pill pill-red">{brain['losses']} L</span></div>
     </div>
 """, unsafe_allow_html=True)
